@@ -7,9 +7,10 @@ import cors from "cors"
 
 import { Server } from "socket.io"
 import {createServer} from "node:http"
-import { connectToSocket } from "./sockets/socketManager.js"
+import { connectToSocket } from "./src/sockets/socketManager.js"
 
-import userRoutes from "./routes/users.routes.js";
+import userRoutes from "./src/routes/users.routes.js";
+
 const app=express();
 const MONGO_URL = process.env.MONGO_URL;
 const server=createServer(app);

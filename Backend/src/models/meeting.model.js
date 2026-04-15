@@ -15,7 +15,7 @@ const meetingSchema= new Schema({
         default:Date.now(),
         required:true
     }
-})
+}, { timestamps: true })
 
 const Meeting =mongoose.model("Meeting",meetingSchema);
 

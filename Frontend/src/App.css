@@ -1,0 +1,14 @@
+.landingPageContainer {
+ position: absolute;
+  top: 0;
+  z-index: -2;
+  height: 100vh;
+  width: 100vw;
+  transform: rotate(180deg);
+  background-color: white;
+  background-image: radial-gradient(
+    60% 120% at 50% 50%,
+    hsla(0, 0%, 100%, 0) 0%,
+    rgba(252, 205, 238, 0.5) 100%
+  );
+}
