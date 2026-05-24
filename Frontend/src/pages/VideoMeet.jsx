@@ -1,34 +1,60 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import WatchParty from "../pages/WatchParty"
 import { useParams, useNavigate } from "react-router-dom";
 import { io } from "socket.io-client";
-import {
-    FaMicrophone, FaMicrophoneSlash,
-    FaVideo, FaVideoSlash,
-    FaDesktop, FaComments, FaPhoneSlash
-} from "react-icons/fa";
+import axios from "axios";
+import { useAuth } from "../contexts/AuthContext";
+
+// Modular subcomponents
+import ChatPanel from "../components/ChatPanel";
+import ParticipantPanel from "../components/ParticipantPanel";
+import ControlBar from "../components/ControlBar";
 
 const socket = io("http://localhost:8000");
 
 export default function VideoMeet() {
     const { id } = useParams();
     const navigate = useNavigate();
+    const { token, username } = useAuth();
 
+    // WebRTC refs
     const localVideoRef = useRef(null);
     const remoteVideoRef = useRef(null);
     const localStream = useRef(null);
     const peerConnection = useRef(null);
     const remoteUserIdRef = useRef(null);
 
+    // Recording refs
+    const mediaRecorderRef = useRef(null);
+    const recordedChunksRef = useRef([]);
+
+    // States
     const [joined, setJoined] = useState(false);
     const [isMuted, setIsMuted] = useState(false);
     const [isCameraOff, setIsCameraOff] = useState(false);
     const [showChat, setShowChat] = useState(false);
+    const [showParticipants, setShowParticipants] = useState(false);
     const [messages, setMessages] = useState([]);
-    const [input, setInput] = useState("");
+    const [participants, setParticipants] = useState([]);
+    const [isRecording, setIsRecording] = useState(false);
     const [remoteUserName, setRemoteUserName] = useState("Remote User");
 
-    // 🎥 start camera and AUTO-JOIN
+    // Log meeting in activity history on entry
+    useEffect(() => {
+        const logActivity = async () => {
+            if (!token || !id) return;
+            try {
+                await axios.post("http://localhost:8000/api/v1/users/add_to_activity", {
+                    token,
+                    meeting_code: id
+                });
+            } catch (err) {
+                console.error("Failed to log activity:", err.message);
+            }
+        };
+        logActivity();
+    }, [token, id]);
+
+    // 🎥 Start local camera & microphone streams
     useEffect(() => {
         const startVideoAndJoin = async () => {
             try {
@@ -38,16 +64,13 @@ export default function VideoMeet() {
                 });
 
                 localStream.current = stream;
-
                 if (localVideoRef.current) {
                     localVideoRef.current.srcObject = stream;
                 }
 
-                // Auto-join the meeting once camera is ready
-                console.log("Auto-joining room:", id);
-                socket.emit("join-call", id);
+                console.log("Auto-joining room:", id, username);
+                socket.emit("join-call", id, username);
                 setJoined(true);
-
             } catch (err) {
                 console.error("Error accessing media devices:", err);
             }
@@ -62,12 +85,10 @@ export default function VideoMeet() {
             if (peerConnection.current) {
                 peerConnection.current.close();
             }
-            // Don't disconnect socket here, let it stay connected
-            // socket.disconnect(); // Remove this
         };
-    }, [id]); // Add id as dependency
+    }, [id]);
 
-    // ⚙️ peer connection
+    // ⚙️ Create Peer Connection (WebRTC)
     const createPeerConnection = useCallback(() => {
         const pc = new RTCPeerConnection({
             iceServers: [
@@ -76,7 +97,6 @@ export default function VideoMeet() {
             ]
         });
 
-        // Add all tracks from local stream
         if (localStream.current) {
             localStream.current.getTracks().forEach(track => {
                 pc.addTrack(track, localStream.current);
@@ -87,13 +107,11 @@ export default function VideoMeet() {
             console.log("Received remote track");
             if (remoteVideoRef.current) {
                 remoteVideoRef.current.srcObject = event.streams[0];
-                setRemoteUserName("Remote User");
             }
         };
 
         pc.onicecandidate = (event) => {
             if (event.candidate && remoteUserIdRef.current) {
-                console.log("Sending ICE candidate");
                 socket.emit("signal", {
                     to: remoteUserIdRef.current,
                     message: event.candidate
@@ -103,28 +121,19 @@ export default function VideoMeet() {
 
         pc.oniceconnectionstatechange = () => {
             console.log("ICE connection state:", pc.iceConnectionState);
-            if (pc.iceConnectionState === "connected") {
-                console.log("✅ Peer connection established!");
-            } else if (pc.iceConnectionState === "failed") {
-                console.error("❌ ICE connection failed");
-            }
         };
 
         return pc;
     }, []);
 
-    // socket logic
+    // 🔌 Setup Socket Listeners
     useEffect(() => {
         if (!joined) return;
 
-        console.log("Setting up socket listeners for room:", id);
-
-        // User joined handler
         const handleUserJoined = async (userId) => {
             console.log("👤 User joined:", userId);
             remoteUserIdRef.current = userId;
             
-            // Close existing peer connection if any
             if (peerConnection.current) {
                 peerConnection.current.close();
             }
@@ -138,24 +147,19 @@ export default function VideoMeet() {
                 to: userId,
                 message: offer
             });
-            console.log("📤 Sent offer to:", userId);
         };
 
-        // Signal handler
         const handleSignal = async ({ from, message }) => {
-            console.log("📨 Received signal:", message.type || "candidate", "from:", from);
-            
             if (message.type === "offer") {
                 remoteUserIdRef.current = from;
                 
-                // Close existing peer connection if any
                 if (peerConnection.current) {
                     peerConnection.current.close();
                 }
                 
                 peerConnection.current = createPeerConnection();
-
                 await peerConnection.current.setRemoteDescription(message);
+                
                 const answer = await peerConnection.current.createAnswer();
                 await peerConnection.current.setLocalDescription(answer);
 
@@ -163,32 +167,25 @@ export default function VideoMeet() {
                     to: from,
                     message: answer
                 });
-                console.log("📤 Sent answer to:", from);
-
             } else if (message.type === "answer") {
                 if (peerConnection.current) {
                     await peerConnection.current.setRemoteDescription(message);
-                    console.log("✅ Remote description set");
                 }
-
             } else if (message.candidate) {
                 if (peerConnection.current) {
                     await peerConnection.current.addIceCandidate(message);
-                    console.log("✅ ICE candidate added");
                 }
             }
         };
 
-        // Chat handler
-        const handleChatMessage = ({ message, sender }) => {
-            console.log("💬 Chat message received:", message);
+        const handleChatMessage = ({ message, sender, username: senderName }) => {
             setMessages(prev => [...prev, {
                 text: message,
-                sender: sender === socket.id ? "me" : "them"
+                sender: sender === socket.id ? "me" : "them",
+                username: senderName
             }]);
         };
 
-        // User left handler
         const handleUserLeft = (userId) => {
             console.log("👋 User left:", userId);
             if (remoteVideoRef.current) {
@@ -202,20 +199,51 @@ export default function VideoMeet() {
             setRemoteUserName("Remote User");
         };
 
+        const handleRoomUsers = (usersList) => {
+            setParticipants(usersList);
+            const otherUser = usersList.find(u => u.id !== socket.id);
+            if (otherUser) {
+                setRemoteUserName(otherUser.username || "Remote User");
+            }
+        };
+
+        const handleMuteInstruction = () => {
+            if (localStream.current) {
+                const audioTrack = localStream.current.getAudioTracks()[0];
+                if (audioTrack) {
+                    audioTrack.enabled = false;
+                    setIsMuted(true);
+                    alert("You have been muted by the host.");
+                }
+            }
+        };
+
+        const handleKickInstruction = () => {
+            alert("You have been kicked out of the meeting by the host.");
+            leaveMeeting();
+        };
+
+        // Bind events
         socket.on("user-joined", handleUserJoined);
         socket.on("signal", handleSignal);
         socket.on("chat-message", handleChatMessage);
         socket.on("user-left", handleUserLeft);
+        socket.on("room-users", handleRoomUsers);
+        socket.on("mute-instruction", handleMuteInstruction);
+        socket.on("kick-instruction", handleKickInstruction);
 
         return () => {
             socket.off("user-joined", handleUserJoined);
             socket.off("signal", handleSignal);
             socket.off("chat-message", handleChatMessage);
             socket.off("user-left", handleUserLeft);
+            socket.off("room-users", handleRoomUsers);
+            socket.off("mute-instruction", handleMuteInstruction);
+            socket.off("kick-instruction", handleKickInstruction);
         };
     }, [joined, createPeerConnection, id]);
 
-    // 🎤 mute
+    // 🎤 Toggle Microphone Mute
     const toggleMute = () => {
         if (localStream.current) {
             const audioTrack = localStream.current.getAudioTracks()[0];
@@ -226,7 +254,7 @@ export default function VideoMeet() {
         }
     };
 
-    // 📷 camera
+    // 📷 Toggle Camera On/Off
     const toggleCamera = () => {
         if (localStream.current) {
             const videoTrack = localStream.current.getVideoTracks()[0];
@@ -237,7 +265,7 @@ export default function VideoMeet() {
         }
     };
 
-    // 📺 screen share
+    // 📺 Start Screen Share
     const startScreenShare = async () => {
         try {
             const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
@@ -255,16 +283,13 @@ export default function VideoMeet() {
                 localVideoRef.current.srcObject = stream;
             }
 
-            track.onended = async () => {
+            track.onended = () => {
                 if (localStream.current && localVideoRef.current) {
                     localVideoRef.current.srcObject = localStream.current;
-                    
-                    // Restore original video track in peer connection
                     const videoTrack = localStream.current.getVideoTracks()[0];
                     const currentSender = peerConnection.current
                         ?.getSenders()
                         .find(s => s.track?.kind === "video");
-                    
                     if (currentSender && videoTrack) {
                         currentSender.replaceTrack(videoTrack);
                     }
@@ -275,7 +300,7 @@ export default function VideoMeet() {
         }
     };
 
-    // 🚪 leave
+    // 🚪 Leave Meeting
     const leaveMeeting = () => {
         if (peerConnection.current) {
             peerConnection.current.close();
@@ -284,223 +309,133 @@ export default function VideoMeet() {
         navigate("/lobby");
     };
 
-    // 💬 send
-    const sendMessage = () => {
-        if (!input.trim()) return;
-
-        socket.emit("chat-message", input);
+    // 💬 Send Chat Message
+    const handleSendMessage = (text) => {
+        socket.emit("chat-message", text);
         setMessages(prev => [...prev, {
-            text: input,
-            sender: "me"
+            text,
+            sender: "me",
+            username: "You"
         }]);
-        setInput("");
+    };
+
+    // 👑 Host Moderation Handlers
+    const handleMuteUser = (targetUserId) => {
+        socket.emit("mute-user", { roomId: id, targetUserId });
+    };
+
+    const handleKickUser = (targetUserId) => {
+        socket.emit("kick-user", { roomId: id, targetUserId });
+    };
+
+    // 🔴 Recording Control Handler
+    const toggleRecording = async () => {
+        if (isRecording) {
+            if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+                mediaRecorderRef.current.stop();
+            }
+        } else {
+            try {
+                const stream = await navigator.mediaDevices.getDisplayMedia({
+                    video: true,
+                    audio: true
+                });
+
+                recordedChunksRef.current = [];
+                const recorder = new MediaRecorder(stream, { mimeType: "video/webm; codecs=vp9" });
+
+                recorder.ondataavailable = (e) => {
+                    if (e.data && e.data.size > 0) {
+                        recordedChunksRef.current.push(e.data);
+                    }
+                };
+
+                recorder.onstop = () => {
+                    const blob = new Blob(recordedChunksRef.current, { type: "video/webm" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.style.display = "none";
+                    a.href = url;
+                    a.download = `meeting-record-${id}.webm`;
+                    document.body.appendChild(a);
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    setIsRecording(false);
+                    stream.getTracks().forEach(t => t.stop());
+                };
+
+                mediaRecorderRef.current = recorder;
+                recorder.start();
+                setIsRecording(true);
+            } catch (err) {
+                console.error("Failed to start recording:", err);
+            }
+        }
     };
 
     return (
-        <div style={{ height: "100vh", background: "#020617", color: "white", position: "relative" }}>
-            {/* CHAT PANEL */}
+        <div className="h-screen bg-[#020617] text-white relative overflow-hidden">
+            
+            {/* Modular Chat Window */}
             {showChat && (
-                <div style={{
-                    position: "fixed",
-                    right: 0,
-                    top: 0,
-                    width: 320,
-                    height: "100%",
-                    background: "#0f172a",
-                    borderLeft: "1px solid #1e293b",
-                    display: "flex",
-                    flexDirection: "column",
-                    zIndex: 1000
-                }}>
-                    <div style={{
-                        padding: "16px",
-                        borderBottom: "1px solid #1e293b",
-                        fontWeight: "bold",
-                        background: "#0f172a"
-                    }}>
-                        Chat
-                    </div>
-                    
-                    <div style={{
-                        flex: 1,
-                        overflowY: "auto",
-                        padding: "16px",
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: "8px"
-                    }}>
-                        {messages.length === 0 && (
-                            <div style={{ textAlign: "center", color: "#666", padding: "20px" }}>
-                                No messages yet
-                            </div>
-                        )}
-                        {messages.map((m, i) => (
-                            <div key={i} style={{
-                                textAlign: m.sender === "me" ? "right" : "left",
-                                padding: "8px 12px",
-                                background: m.sender === "me" ? "#3b82f6" : "#1e293b",
-                                borderRadius: "8px",
-                                maxWidth: "80%",
-                                marginLeft: m.sender === "me" ? "auto" : "0",
-                                wordBreak: "break-word"
-                            }}>
-                                <div style={{ fontSize: "12px", opacity: 0.7, marginBottom: "4px" }}>
-                                    {m.sender === "me" ? "You" : remoteUserName}
-                                </div>
-                                {m.text}
-                            </div>
-                        ))}
-                    </div>
-                    
-                    <div style={{
-                        padding: "16px",
-                        borderTop: "1px solid #1e293b",
-                        display: "flex",
-                        gap: "8px"
-                    }}>
-                        <input
-                            value={input}
-                            onChange={(e) => setInput(e.target.value)}
-                            onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-                            placeholder="Type a message..."
-                            style={{
-                                flex: 1,
-                                padding: "8px 12px",
-                                borderRadius: "6px",
-                                border: "1px solid #1e293b",
-                                background: "#1e293b",
-                                color: "white",
-                                outline: "none"
-                            }}
-                        />
-                        <button
-                            onClick={sendMessage}
-                            style={{
-                                padding: "8px 16px",
-                                background: "#3b82f6",
-                                border: "none",
-                                borderRadius: "6px",
-                                color: "white",
-                                cursor: "pointer"
-                            }}
-                        >
-                            Send
-                        </button>
-                    </div>
-                </div>
+                <ChatPanel 
+                    messages={messages} 
+                    remoteUserName={remoteUserName} 
+                    onSendMessage={handleSendMessage} 
+                    onClose={() => setShowChat(false)}
+                />
             )}
 
-            {/* VIDEO LAYOUT */}
-            <div style={{ 
-                position: "relative", 
-                textAlign: "center", 
-                height: "100vh",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                background: "#000"
-            }}>
+            {/* Modular Participant Directory & Host Controls */}
+            {showParticipants && (
+                <ParticipantPanel 
+                    participants={participants} 
+                    currentSocketId={socket.id} 
+                    onMuteUser={handleMuteUser} 
+                    onKickUser={handleKickUser} 
+                    onClose={() => setShowParticipants(false)}
+                />
+            )}
+
+            {/* Main Video Presentation Grid */}
+            <div className="relative text-center h-screen flex items-center justify-center bg-black">
                 <video 
                     ref={remoteVideoRef} 
                     autoPlay 
                     playsInline
-                    style={{ 
-                        width: "100%", 
-                        height: "100%",
-                        objectFit: "contain"
-                    }} 
+                    className="w-full h-full object-contain" 
                 />
                 
-                {/* Local Video (Picture-in-Picture) */}
+                {/* Local Camera (PiP Overlay) */}
                 <video
                     ref={localVideoRef}
                     autoPlay
                     muted
                     playsInline
-                    style={{
-                        position: "absolute",
-                        bottom: "80px",
-                        right: "20px",
-                        width: "180px",
-                        borderRadius: "8px",
-                        border: "2px solid #3b82f6",
-                        zIndex: 10,
-                        cursor: "pointer"
-                    }}
-                    onClick={() => {
-                        // Optional: swap videos on click
-                    }}
+                    className="absolute bottom-24 right-5 w-44 rounded-xl border-2 border-blue-500 z-10 shadow-lg cursor-pointer transition-all hover:scale-105"
                 />
             </div>
 
-            {/* Meeting Info */}
-            <div style={{
-                position: "fixed",
-                top: "20px",
-                left: "20px",
-                background: "rgba(0,0,0,0.7)",
-                padding: "8px 16px",
-                borderRadius: "8px",
-                zIndex: 100
-            }}>
+            {/* Room Identifier Info Banner */}
+            <div className="fixed top-5 left-5 bg-black/70 backdrop-blur-sm px-4 py-2 rounded-lg z-50 border border-white/5 font-semibold text-sm shadow-md">
                 Meeting ID: {id}
             </div>
 
-            {/* CONTROLS */}
-            <div style={{
-                position: "fixed",
-                bottom: "20px",
-                left: "50%",
-                transform: "translateX(-50%)",
-                display: "flex",
-                gap: "12px",
-                background: "#1e293b",
-                padding: "12px 24px",
-                borderRadius: "50px",
-                zIndex: 100
-            }}>
-                <button onClick={toggleMute} style={buttonStyle}>
-                    {isMuted ? <FaMicrophoneSlash size={20} /> : <FaMicrophone size={20} />}
-                </button>
-
-                <button onClick={toggleCamera} style={buttonStyle}>
-                    {isCameraOff ? <FaVideoSlash size={20} /> : <FaVideo size={20} />}
-                </button>
-
-                <button onClick={startScreenShare} style={buttonStyle}>
-                    <FaDesktop size={20} />
-                </button>
-
-                <button onClick={() => setShowChat(p => !p)} style={{
-                    ...buttonStyle,
-                    background: showChat ? "#3b82f6" : "#1e293b"
-                }}>
-                    <FaComments size={20} />
-                </button>
-
-                <WatchParty socket={socket} roomId={id} />
-
-                <button onClick={leaveMeeting} style={{...buttonStyle, background: "#ef4444"}}>
-                    <FaPhoneSlash size={20} />
-                </button>
-            </div>
+            {/* Modular Control Buttons Bar */}
+            <ControlBar 
+                isMuted={isMuted}
+                toggleMute={toggleMute}
+                isCameraOff={isCameraOff}
+                toggleCamera={toggleCamera}
+                startScreenShare={startScreenShare}
+                showChat={showChat}
+                setShowChat={setShowChat}
+                showParticipants={showParticipants}
+                setShowParticipants={setShowParticipants}
+                isRecording={isRecording}
+                toggleRecording={toggleRecording}
+                leaveMeeting={leaveMeeting}
+            />
         </div>
     );
 }
-
-const buttonStyle = {
-    background: "#1e293b",
-    border: "none",
-    borderRadius: "50%",
-    width: "48px",
-    height: "48px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    cursor: "pointer",
-    color: "white",
-    transition: "all 0.2s",
-    hover: {
-        background: "#3b82f6"
-    }
-};

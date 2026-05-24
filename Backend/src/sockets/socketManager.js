@@ -14,35 +14,41 @@ export const connectToSocket = (server) => {
     io.on("connection", (socket) => { //runs every time a new user connects
         console.log("User connected:", socket.id);
 
+        const updateRoomUsers = (roomId) => {
+            const clients = Array.from(io.sockets.adapter.rooms.get(roomId) || []);
+            if (clients.length === 0) return;
+            const hostId = clients[0];
+            const users = clients.map(cid => {
+                const clientSocket = io.sockets.sockets.get(cid);
+                return {
+                    id: cid,
+                    username: clientSocket ? clientSocket.username : `User (${cid.slice(0, 5)})`,
+                    isHost: cid === hostId
+                };
+            });
+            io.to(roomId).emit("room-users", users);
+        };
+
         // =========================
         // JOIN CALL
         // =========================
-        socket.on("join-call", (roomId) => {
-
-            socket.join(roomId); //  built-in room system, internally roomId->[socket1, socket2]
-            socket.roomId = roomId; // store for later use
+        socket.on("join-call", (roomId, username) => {
+            socket.join(roomId);
+            socket.roomId = roomId;
+            socket.username = username || `User (${socket.id.slice(0, 5)})`;
             timeOnline[socket.id] = new Date();
-            console.log(`${socket.id} joined room ${roomId}`);
+            console.log(`${socket.username} (${socket.id}) joined room ${roomId}`);
 
             // notify others (excluding self)
-            socket.to(roomId).emit("user-joined", socket.id);
+            socket.to(roomId).emit("user-joined", socket.id, socket.username);
 
-                //What frontend receives:
-              // socket.on("user-joined", (newUserId) => {})
-
-                // Trigger WebRTC call here
+            // Send updated participant list
+            updateRoomUsers(roomId);
         });
 
         // =========================
         // SIGNAL (WebRTC)
         // =========================
-
-        //Client sends:
-
-        // socket.emit("signal", {
-        //    to: otherUserId,
-        //    message: offer/answer
-        // });
         socket.on("signal", ({ to, message }) => {
             io.to(to).emit("signal", {
                 from: socket.id,
@@ -54,22 +60,38 @@ export const connectToSocket = (server) => {
         // CHAT MESSAGE
         // =========================
         socket.on("chat-message", (message) => {
-
             const roomId = socket.roomId;
             if (!roomId) return;
 
-            // send to everyone in room
-            io.to(roomId).emit("chat-message", {
+            // Broadcast to other users in the room (excluding sender)
+            socket.to(roomId).emit("chat-message", {
                 message,
-                sender: socket.id
+                sender: socket.id,
+                username: socket.username || `User (${socket.id.slice(0, 5)})`
             });
+        });
+
+        // =========================
+        // HOST MODERATION
+        // =========================
+        socket.on("mute-user", ({ roomId, targetUserId }) => {
+            const clients = Array.from(io.sockets.adapter.rooms.get(roomId) || []);
+            if (clients[0] === socket.id) {
+                io.to(targetUserId).emit("mute-instruction");
+            }
+        });
+
+        socket.on("kick-user", ({ roomId, targetUserId }) => {
+            const clients = Array.from(io.sockets.adapter.rooms.get(roomId) || []);
+            if (clients[0] === socket.id) {
+                io.to(targetUserId).emit("kick-instruction");
+            }
         });
 
         // =========================
         // DISCONNECT
         // =========================
         socket.on("disconnect", () => {
-
             const roomId = socket.roomId;
             if (!roomId) return;
 
@@ -78,35 +100,15 @@ export const connectToSocket = (server) => {
             const timeSpent = new Date() - joinTime;
 
             console.log("Time spent (ms):", timeSpent);
-
-            // optional: convert to seconds
             console.log("Time spent (sec):", Math.floor(timeSpent / 1000));
 
-            // cleanup
             delete timeOnline[socket.id];
-            // notify others
             socket.to(roomId).emit("user-left", socket.id);
-            //You DID NOT manually remove user
-            //Because:
-            //Socket.IO does it automatically when a user disconnects, it removes them from all rooms they were part of
+
+            // Send updated participant list to remaining users
+            updateRoomUsers(roomId);
         });
 
-        socket.on("watch-party-load", ({ roomId, videoId, currentTime }) => {
-    socket.to(roomId).emit("watch-party-load", { videoId, currentTime });
-});
-
-    // Control video (play/pause/seek)
-    socket.on("watch-party-control", ({ roomId, action, time }) => {
-        socket.to(roomId).emit("sync-time", { 
-            playing: action === 'play',
-            time: time || 0 
-        });
-    });
-
-    // Close watch party
-    socket.on("watch-party-close", ({ roomId }) => {
-        socket.to(roomId).emit("watch-party-closed");
-    });
     });
 
     return io;

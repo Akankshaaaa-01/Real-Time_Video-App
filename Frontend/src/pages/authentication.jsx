@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from "react-router-dom";
 export default function Authentication() {
@@ -11,8 +11,29 @@ export default function Authentication() {
     const [formState, setFormState] = useState(1); // 1 = signup, 0 = signin
     const [open, setOpen] = useState(true);
 
-    const { login, register } = useAuth();
+    const { login, register, token } = useAuth();
     const navigate = useNavigate();
+
+    // Check query parameters for form mode and redirect if already logged in
+    useEffect(() => {
+        const queryParams = new URLSearchParams(window.location.search);
+        const mode = queryParams.get("mode");
+        if (mode === "login") {
+            setFormState(0);
+        } else if (mode === "register") {
+            setFormState(1);
+        }
+
+        if (token) {
+            const joinId = queryParams.get("join");
+            if (joinId) {
+                navigate(`/meet/${joinId}`);
+            } else {
+                navigate("/lobby");
+            }
+        }
+    }, [token, navigate]);
+
     const handleSubmit = async () => {
         setError('');
         setMessage('');
@@ -40,7 +61,13 @@ export default function Authentication() {
                 } else {
                     setMessage('Logged in successfully!');
                     setOpen(false); // close modal
-                    navigate("/lobby");
+                    const queryParams = new URLSearchParams(window.location.search);
+                    const joinId = queryParams.get("join");
+                    if (joinId) {
+                        navigate(`/meet/${joinId}`);
+                    } else {
+                        navigate("/lobby");
+                    }
                 }
 
             } else {
