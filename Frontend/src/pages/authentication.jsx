@@ -10,6 +10,7 @@ export default function Authentication() {
     const [message, setMessage] = useState('');
     const [formState, setFormState] = useState(1); // 1 = signup, 0 = signin
     const [open, setOpen] = useState(true);
+    const [loading, setLoading] = useState(false);
 
     const { login, register, token } = useAuth();
     const navigate = useNavigate();
@@ -49,6 +50,7 @@ export default function Authentication() {
             return;
         }
 
+        setLoading(true);
         try {
             let res;
 
@@ -84,7 +86,13 @@ export default function Authentication() {
 
         } catch (err) {
             setError('An unexpected error occurred');
+        } finally {
+            setLoading(false);
         }
+    };
+
+    const handleKeyDown = (e) => {
+        if (e.key === 'Enter') handleSubmit();
     };
 
     const handleToggle = (state) => {
@@ -126,7 +134,9 @@ export default function Authentication() {
                         placeholder="Full Name"
                         value={name}
                         onChange={(e) => setName(e.target.value)}
-                        className="bg-white/5 border border-white/10 rounded-xl px-4 py-3"
+                        onKeyDown={handleKeyDown}
+                        disabled={loading}
+                        className="bg-white/5 border border-white/10 rounded-xl px-4 py-3 disabled:opacity-50"
                     />
                 )}
 
@@ -135,7 +145,9 @@ export default function Authentication() {
                     placeholder="Username"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    className="bg-white/5 border border-white/10 rounded-xl px-4 py-3"
+                    onKeyDown={handleKeyDown}
+                    disabled={loading}
+                    className="bg-white/5 border border-white/10 rounded-xl px-4 py-3 disabled:opacity-50"
                 />
 
                 <input
@@ -143,7 +155,9 @@ export default function Authentication() {
                     placeholder="Password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="bg-white/5 border border-white/10 rounded-xl px-4 py-3"
+                    onKeyDown={handleKeyDown}
+                    disabled={loading}
+                    className="bg-white/5 border border-white/10 rounded-xl px-4 py-3 disabled:opacity-50"
                 />
 
                 {/* Messages */}
@@ -152,9 +166,16 @@ export default function Authentication() {
 
                 <button
                     onClick={handleSubmit}
-                    className="bg-blue-900 hover:bg-blue-700 py-3 rounded-xl font-semibold"
+                    disabled={loading}
+                    className="bg-blue-900 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed py-3 rounded-xl font-semibold flex items-center justify-center gap-2 transition-all"
                 >
-                    {formState === 0 ? 'Login' : 'Create Account'}
+                    {loading && (
+                        <svg className="animate-spin w-4 h-4 text-white" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                        </svg>
+                    )}
+                    {loading ? 'Please wait...' : (formState === 0 ? 'Login' : 'Create Account')}
                 </button>
 
             </div>

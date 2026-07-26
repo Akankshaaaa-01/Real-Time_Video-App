@@ -29,8 +29,6 @@ const login = async (req, res) => {
     const token = jwt.sign({ userId: user._id, username: user.username }, process.env.JWT_SECRET, {
       expiresIn: "1d",
     });
-    user.token = token;
-    await user.save();
 
     return res.status(httpStatus.OK).json({ token, username: user.username, name: user.name });
   } catch (err) {
@@ -73,7 +71,7 @@ const addToActivity = async (req, res) => {
   }
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
+
     // Deduplicate atomically using findOneAndUpdate with upsert
     const tenSecondsAgo = new Date(Date.now() - 10000);
     await Meeting.findOneAndUpdate(
@@ -108,7 +106,7 @@ const getAllActivity = async (req, res) => {
   }
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const activities = await Meeting.find({ user_id: decoded.userId }).sort({ createdAt: -1 });
+    const activities = await Meeting.find({ user_id: decoded.userId }).sort({ date: -1 });
     return res.status(200).json(activities);
   } catch (err) {
     return res.status(500).json({ message: `Something went wrong: ${err.message}` });
