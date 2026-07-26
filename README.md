@@ -1,21 +1,21 @@
-# 🎥 Meetrix — Real-Time Video Conferencing App
+#  Meetrix — Real-Time Video Conferencing App
 
 A full-stack real-time video conferencing application built with **React**, **Node.js**, **Socket.IO**, and **WebRTC**. Supports multi-party video calls, live chat, screen sharing, meeting recording, and host moderation controls.
 
 ---
 
-## ✨ Features
+##  Features
 
-- 🔐 **JWT Authentication** — Register, Login, and Protected Routes
-- 📹 **Multi-Party Video Calls** — WebRTC peer-to-peer connections for multiple participants
-- 💬 **Real-Time Chat** — In-meeting chat panel via Socket.IO
-- 🖥️ **Screen Sharing** — Share your screen with all participants
-- 🎙️ **Mic & Camera Toggle** — Mute/unmute and enable/disable camera
-- ⏺️ **Meeting Recording** — Record and download the session as `.webm`
-- 👑 **Host Moderation** — Host can mute or kick any participant
-- 📋 **Participant Panel** — Live list of all participants with host badge
-- 📅 **Meeting History** — Past meetings saved and shown in Lobby
-- 🔗 **Shareable Meeting Links** — Join via meeting ID or direct URL
+-  **JWT Authentication** — Register, Login, and Protected Routes
+-  **Multi-Party Video Calls** — WebRTC peer-to-peer connections for multiple participants
+-  **Real-Time Chat** — In-meeting chat panel via Socket.IO
+-  **Screen Sharing** — Share your screen with all participants
+-  **Mic & Camera Toggle** — Mute/unmute and enable/disable camera
+-  **Meeting Recording** — Record and download the session as `.webm`
+-  **Host Moderation** — Host can mute or kick any participant
+-  **Participant Panel** — Live list of all participants with host badge
+-  **Meeting History** — Past meetings saved and shown in Lobby
+-  **Shareable Meeting Links** — Join via meeting ID or direct URL
 
 ---
 
